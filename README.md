@@ -5,7 +5,7 @@ Data used in this code came from the folowing sources:
 
 ## Glad Alerts
 
-https://storage.googleapis.com/earthenginepartnershansen/GLADalert/C2/current/\[**key**\]
+https://storage.googleapis.com/earthenginepartnershansen/GLADalert/C2/current/ \[**key**\]
 
 using the flowing \[**key**\]:
 alertDateYY_DD1H_D1H_DD2H_D2H.tif
