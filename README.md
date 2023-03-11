@@ -3,7 +3,7 @@ Individualized speed of deforestation occurrences
 
 Data used in this code came from the folowing sources:
 
-#Glad Alerts
+## Glad Alerts
 
 https://storage.googleapis.com/earthenginepartnershansen/GLADalert/C2/current/\[**key**\]
 
@@ -20,7 +20,7 @@ H is a one-character letter representing de hemisphere (N/S/E/W). N or S for lat
 
 http://glad-forest-alert.appspot.com/
 
-#Natural Earth 
+## Natural Earth 
 
 Grids 10x10 degrees
 https://naciscdn.org/naturalearth/110m/physical/ne_110m_graticules_10.zip
