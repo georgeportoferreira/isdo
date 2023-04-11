@@ -20,7 +20,6 @@ select_tiles <- function(country) {
 
 
 # Download Tiles
-
 download_tiles <- function (selected_tiles, year){
   list_of_raster_glad <- as.list(NULL)
     for (i in 1:length(selected_tiles)) {
@@ -30,6 +29,16 @@ download_tiles <- function (selected_tiles, year){
   }
   return(list_of_raster_glad)
 }  
+
+# Read tiles from disk
+read_from_disk <- function(selected_tiles, year){
+  list_of_raster_glad <- as.list(NULL)
+  for (i in 1:length(selected_tiles)) {
+    list_of_raster_glad[[i]] <- raster(paste0(
+      'Z:/DATA/George/GLAD/',year,'/',selected_tiles[i],'.tif'))
+  }
+  return(list_of_raster_glad)
+}
 
 
 # Clump and sieve pixels
@@ -49,23 +58,25 @@ clump_n_sieve <- function(list_of_downloaded_tiles){
       freq(sieved_glad, useNA = 'no', progress = 'text')
     )
     list_of_sieved[[i]] <- sieved_glad
-  return(list(list_of_sieved, list_of_f_sieved))
   }
+  return(list(list_of_sieved, list_of_f_sieved))
 }
 
 # start and end dates
-get_start_end_date <- function(glad_raster, sieved_glad, fsg){
+get_start_end_date <- function(glad_raster, sieved_glad){
   start_end_d <- as.list(NULL)
-  for (i in 1:length(sieved_glad)) {
-    sieved_matrix <- as.matrix(sieved_glad[[i]])
+  for (i in 1:length(sieved_glad[[2]])) {
+    sieved_matrix <- as.matrix(sieved_glad[[1]][[i]])
     glad_matrix <- as.matrix(glad_raster[[i]])
     start_end_dates <- data.frame(id=as.character(NA), start=as.POSIXct.Date(NA), end=as.POSIXct.Date(NA))#, speed=as.numeric(NA))
-    for (i in 1:length(fsg[,1])) {
-      start_end_dates[i,] <- c(fsg[i,1], 
-                               strftime(as.Date(min(glad_matrix[which(sieved_matrix[]==fsg[i,1])]),origin="2022-01-01"), format = "%Y-%m-%d"), 
-                               strftime(as.Date(max(glad_matrix[which(sieved_matrix[]==fsg[i,1])]),origin="2022-01-01"), format = "%Y-%m-%d")
+    for (i in 1:length(sieved_glad[[2]][,1])) {
+      start_end_dates[i,] <- c(sieved_glad[[2]][i,1],
+                               strftime(as.Date(min(glad_matrix[which(sieved_matrix[]==sieved_glad[[2]][i,1])]),
+                                                origin="2022-01-01"), format = "%Y-%m-%d"),
+                               strftime(as.Date(max(glad_matrix[which(sieved_matrix[]==sieved_glad[[2]][i,1])]),
+                                                origin="2022-01-01"), format = "%Y-%m-%d")
       )
-      print(paste(i, 'from',length(fsg[,1]),'at', Sys.time()))
+      print(paste(i, 'from',length(sieved_glad[[2]][,1]),'at', Sys.time()))
     }
     start_end_d[[i]] <- start_end_dates
   }
