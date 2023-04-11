@@ -62,7 +62,7 @@ clump_n_sieve <- function(list_of_downloaded_tiles){
   return(list(list_of_sieved, list_of_f_sieved))
 }
 
-# start and end dates
+## start and end dates
 get_start_end_date <- function(glad_raster, sieved_glad){
   start_end_d <- as.list(NULL)
   for (i in 1:length(sieved_glad[[2]])) {
