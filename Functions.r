@@ -10,9 +10,12 @@ library(dplyr)
 
 # Select Tiles -------------------
 select_tiles <- function(country) {
-  if (country %in% nm_countries) {
+  countries <- st_read("https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson")|>
+    dplyr::select(ADMIN, ISO_A3, geometry)
+  glad_tiles <- st_read("https://raw.githubusercontent.com/georgeportoferreira/ubcdown/main/GLAD_GRID.geojson")
+    if (country %in% countries$ADMIN) {
     tiles_country <- st_intersects(glad_tiles, countries[countries$ADMIN == country, ]$geometry, sparse = FALSE)
-  } else if (country %in% a3_countries) {
+  } else if (country %in% countries$ISO_A3) {
     tiles_country <- st_intersects(glad_tiles, countries[countries$ISO_A3 == country, ]$geometry, sparse = FALSE)
   } else {
     return(print("No data for selected country"))
@@ -64,21 +67,23 @@ load_masked_glad <- function(country, year, dsn = NA) {
   tiles_country <- st_intersects(glad_tiles, aoi, sparse = FALSE)
   selected_tiles <- glad_tiles[tiles_country, ]$id
   list_of_raster_glad <- as.list(NULL)
+  length_selected_tiles <- length(selected_tiles)
   if (!is.na(dsn)) {
-      for (i in 1:length(selected_tiles)) {
-    list_of_raster_glad[[i]] <- mask(raster(paste0(
+      for (i in 1:length_selected_tiles) {
+        print(paste0("Loading from disk tile ", i, "/", length_selected_tiles, " at ", Sys.time()))
+        list_of_raster_glad[[i]] <- mask(raster(paste0(
       dsn, "/alertDate", substr(year, 3, 4), "_", selected_tiles[i], ".tif"
     )), as_Spatial(aoi))
       } 
     }else {
-  for (i in 1:length(selected_tiles)) {
+  for (i in 1:length_selected_tiles) {
+    print(paste0("Downloading tile ", i, "/", length_selected_tiles, " at ", Sys.time()))
     list_of_raster_glad[[i]] <- mask(raster(paste0(
       "https://storage.googleapis.com/earthenginepartners-hansen/GLADalert/C2/current/alertDate",
       substr(year, 3, 4), "_", selected_tiles[i], ".tif"
     )), as_Spatial(aoi))
   }
 }
-  #list_of_raster_glad[length(selected_tiles)+1] <- aoi
   return(list_of_raster_glad)
 }
 
@@ -88,14 +93,19 @@ clump_n_sieve <- function(list_of_rasters, pixels = 16) {
   list_of_clumped <- as.list(NULL)
   list_of_sieved <- as.list(NULL)
   list_of_f_sieved <- as.list(NULL)
-  for (i in 1:length(list_of_rasters)) {
-    list_of_clumped[[i]] <- clump(list_of_rasters[[i]])
+  length_list_of_rasters <- length(list_of_rasters)
+  for (i in 1:length_list_of_rasters) {
+    print(paste0("Clumping tile ", i, "/", length_list_of_rasters, " at ", Sys.time()))
+    list_of_clumped[[i]] <- clump(list_of_rasters[[i]], progress = "text")
+    print(paste0("Stats for clumped ", i, "/", length_list_of_rasters, " at ", Sys.time()))
     f_clumped_glad <- as.data.frame(
       freq(list_of_clumped[[i]], useNA = "no", progress = "text")
     )
     sieved_glad <- list_of_clumped[[i]]
+    print(paste0("Sieving tile ", i, "/", length_list_of_rasters, " at ", Sys.time()))
     excludeID <- f_clumped_glad$value[which(f_clumped_glad$count <= pixels)] # 16 pixels = 1.44 hectare
     sieved_glad[list_of_clumped[[i]] %in% excludeID] <- NA
+    print(paste0("Stats for sieved ", i, "/", length_list_of_rasters, " at ", Sys.time()))
     list_of_f_sieved[[i]] <- as.data.frame(
       freq(sieved_glad, useNA = "no", progress = "text")
     )
@@ -107,8 +117,10 @@ clump_n_sieve <- function(list_of_rasters, pixels = 16) {
 ## start and end dates ---------------------
 get_start_end_date <- function(glad_raster, sieved_glad, year) {
   start_end_d <- as.list(NULL)
-  length_sieved_glad <- length(sieved_glad)
+  length_sieved_glad <- length(sieved_glad[[2]])
   for (i in 1:length_sieved_glad) {
+    print(paste0("Processing Tile ", i, "/", length_sieved_glad, " for dates at ", Sys.time()))
+    if (sieved_glad[[1]][[i]]@data@min == Inf) next
     sieved_matrix <- as.matrix(sieved_glad[[1]][[i]])
     glad_matrix <- as.matrix(glad_raster[[i]])
     start_end_dates <- data.frame(id = as.numeric(NA), start = as.POSIXct.Date(NA), end = as.POSIXct.Date(NA), countpixel = as.numeric(NA))
@@ -124,7 +136,7 @@ get_start_end_date <- function(glad_raster, sieved_glad, year) {
         ), format = "%Y-%m-%d"),
         sieved_glad[[2]][[i]][j, 2]
       )
-      print(paste0("Tile ", i, "/", length_sieved_glad, " collecting ", j, " from ", nrow_sieved_glad, " dates at ", Sys.time()))
+      print(paste0("Tile ", i, "/", length_sieved_glad, " collecting date", j, "/", nrow_sieved_glad, " at ", Sys.time()))
     }
     start_end_d[[i]] <- start_end_dates
   }
@@ -135,15 +147,22 @@ get_start_end_date <- function(glad_raster, sieved_glad, year) {
 ## CREATE POLYGONS ------------
 create_geometry_deforestation <- function(sieved_glad) {
   list_of_deforestation <- as.list(NULL)
-  length_sieved_glad <- length(sieved_glad)  
+  length_sieved_glad <- length(sieved_glad[[1]])  
   for (j in 1:length_sieved_glad) {
-    vetor <- st_sf(data.frame(id = as.numeric(NA), geometry = st_sfc(list(st_polygon()))))
-    points <- rasterToPoints(sieved_glad[[1]][[j]], dissolve = TRUE)
+    print(paste0("Processing Tile ", j, "/", length_sieved_glad, " for deforestation  at ", Sys.time()))
+    if (sieved_glad[[1]][[j]]@data@min == Inf) next
+    vetor <- st_sf(data.frame(id = as.numeric(NA), tile = as.character(NA), geometry = st_sfc(st_polygon()) ))
+    print("Converting raster to points")
+    points <- rasterToPoints(sieved_glad[[1]][[j]], progress = TRUE)
     ids <- unique(points[,3])
-    for (i in 1:length(ids)){
+    tile <- as.character(extent(sieved_glad[[1]][[j]]))
+    length_ids <- length(ids)
+    print("Creating polygon geometries")
+    for (i in 1:length_ids){
+      print(paste0("Deforestation ", i, "/", length_ids, " from tile ",j,"/", length_sieved_glad, " at ", Sys.time()))
       ch <- points[which(points[,3] == ids[i]),1:2][,1:2]
       geometry <- st_polygon(list(ch[c(chull(ch), chull(ch)[1]),]))
-      vetor[i,] <- c(ids[i], st_geometry(geometry))
+      vetor[i,] <- c(ids[i], tile, st_geometry(geometry))
     }
   list_of_deforestation[[j]] <- vetor
   }
@@ -154,10 +173,23 @@ create_geometry_deforestation <- function(sieved_glad) {
 ## ISDO ---------------------
 
 isdo<- function(country, year, pixels = 16, dsn = NA) {
+  print(paste0("PROCESS 1/5 - Loading and masking tiles at ", Sys.time()))
   tiles <- load_masked_glad(country, year,dsn)
+  print(paste0("PROCESS 2/5 - Clumping and sieving tiles at ", Sys.time()))
   clumped_sieved <- clump_n_sieve(tiles, pixels) 
+  print(paste0("PROCESS 3/5 - Colecting dates at", Sys.time()))
   dates <- get_start_end_date(tiles, clumped_sieved, year)
   rm(tiles)
+  print(paste0("PROCESS 4/5 - Creating deforestation geometry at", Sys.time()))
   deforestation <- create_geometry_deforestation(clumped_sieved)
-  return(cbind(do.call("rbind", dates), do.call("rbind", deforestation)))
+  print(paste0("PROCESS 5/5 - Gathering results at", Sys.time()))
+  isdo_result <- cbind(do.call("rbind", dates), do.call("rbind", deforestation))
+  isdo_result <- isdo_result[-5] %>% 
+    mutate(area_vector = st_area(.$geometry), 
+           persistence = as.numeric(trunc(difftime(isdo_result$end, isdo_result$start, units = "day")) +1),
+           age = as.numeric(trunc(difftime(Sys.Date(), isdo_result$end, units = "day"))),
+           isdo = round(as.numeric(countpixel)/as.numeric(persistence), 2),
+           completeness_index = round(as.numeric(countpixel)*900/area_vector,1)
+           )  
+  return(isdo_result[,c(1:5,7:11,6)])
 }
