@@ -1,0 +1,579 @@
+---
+title: Information on Forests - Individualized Approach for Metrics on Deforestation Occurrences in GLAD Alerts (IF I AM DOING Alerts)
+subtitle: Term Project for GEOS 503
+author:
+  - name: George Porto Ferreira
+    orcid: 0000-0002-1117-9523
+    email: georgepf@student.ubc.ca
+    affiliations: 
+        - id: 60010365
+          name: The University of British Columbia
+          department: Department of Geography
+          address: 1984 West Mall
+          city: Vancouver
+          region: BC
+          country: Canada
+          postal-code: V6T 1Z2
+          url: http://geog.ubc.ca/
+        - id: IBAMA
+          name: Instituto Brasileiro do Meio Ambiente e dos Recursos Naturais Renováveis
+          department: Superintendência do Ibama em Santa Catarina
+          address: Rua Conselheiro Mafra, 784
+          city: Florianópolis
+          region: SC
+          country: Brazil
+          postal-code: 88010-102
+          url: https://www.gov.br/ibama/
+    attributes:
+        corresponding: true
+    note: Present address
+abstract: |
+  This paper presents an approach to generate individualized metrics on deforestation occurrences in the world's tropical forests based on pre-processed Landsat images. Such metrics can infer where deforestation agents use more impactful resources (such as tractors and chainsaws), resulting in a larger area deforested in less time. These metrics include data on speed, persistence, age, and completeness index for each deforestation and can be used to guide enforcement agencies in prioritizing field actions to halt deforestation.
+keywords: 
+  - Deforestation
+  - Law enforcement
+  - Environmental Policy
+date: last-modified
+bibliography: bibliography.bib
+csl: elsevier-harvard.csl
+format:
+  elsevier-pdf:
+    keep-tex: true
+    journal:
+      name: Global Environmental Change
+      formatting: preprint
+      model: 3p
+      cite-style: authoryear
+fontsize: "8"
+---
+
+```{r, Setup, include=FALSE}
+library(raster)
+library(sf)
+library(dplyr)
+library(here)
+library(leaflet)
+library(ggplot2)
+
+theme_set(theme_bw())
+```
+
+# Introduction
+
+Deforestation, along with agriculture and other land use changes, is responsible for roughly a quarter of global greenhouse gas (GHG) emissions [@summary2018]
+
+Remote sensing and environmental law enforcement are key in controlling illegal environmental activities. In Brazil, for example, these two factors were the main governmental actions responsible for the success of reducing deforestation rates between 2004 and 2014 [@barbosadeoliveirafilho2020]
+
+The ability to provide a timely response is a crucial part of an effective strategy to inhibit deforestation [@assuncao2019]. The sooner enforcement teams stop deforestation, the more trees will remain standing. Environmental agencies receive so much satellite-generated deforestation detection information that the task of inspecting every single place becomes budgeting impossible. More than three hundred new deforestation detections are generated daily in the Brazilian Amazon[^1]. With such a volume of information, a crucial piece to achieving effectiveness in reducing deforestation lies in having a good way to prioritize field actions.
+
+[^1]: Amount of deforestation detection by daily MODIS data according to the "DETER" Project (Real-Time Deforestation Detection) [@shimabukuro2004]. 
+Data available in <http://terrabrasilis.dpi.inpe.br/geonetwork/srv/por/catalog.search#/metadata/f2153c4a-915b-48a6-8658-963bdce7366c>
+
+Initially, it is important to understand that deforestation detection is produced with static images such as photographs, giving only a synoptic view of the changes on the ground. The DETER^2^ system used in Brazil, for example, has a temporal resolution of five days (revisit), so the same deforestation growing over a month may appear in this system as up to 7 independent detections, that is, a different detection every 5 days (days 1, 6, 11, 16, 21, 26 and 31). In part, the vast number of detection generated daily in the Amazon is due to this pseudo-fractional-deforestation-detection. In other words, the large volume of data derives from the lack of contiguity analysis among these detections. Studies that analyze the contiguity of these real-time detections are still incipient, although they are crucial to understanding the dynamics of deforestation in forests
+
+To understand its importance, we present some hypothetical situations. Suppose two deforestation agents[^2], hypothetically called Ricardo and Joaquim. They start clearing forest areas simultaneously in places apart from each other. We have only one team to make inspections and law enforcement on the field. Choosing Joaquim's to visit first will result on Ricardo's deforestation to keep growing for longer and viceversa. Therefore, if we can identify that Ricardo's deforestation is growing faster and halt it first, we will be able to save more hectares than otherwise. Now suppose that Joaquim has been carrying out his deforestation slowly, thus the inspection teams have neglected this deforestation for several weeks. The damage caused by Joaquim has already reached a stage greater than any rapid deforestation still at the beginning. In this case, the persistence of deforestation over time should also be addressed when deciding where to go. Suppose now we can read Ricardo and Joaquim's thoughts, and we discover that Ricardo intends to carry out one deforestation of 100 hectares in a quick way. Still, Joaquim intends to cut down 2,000 hectares slowly. Which should receive an urgent intervention? This paper will not yet answer that question, but it will produce information to help find those answers.
+
+[^2]: Deforestation agents should be understood as anyone willing to cut trees to develop economic activity in places with forests.
+
+# Material and methods
+
+One of the few available data which capture the temporal dynamics of deforestation without heavy post-processing is the GLAD AlertDate produced build by the Global Land Analysis and Discovery Laboratory (GLAD) in the Department of Geographic Sciences at the University of Maryland. This data is available in 10 by 10-degree tiles for all areas of the globe between latitudes 30 North and 30 South. In addition to this range, two tiles extrapolate these latitudes: one in southern Brazil, also covering Uruguay and part of Argentina and another in eastern Russia. The GLAD AlertDate began to be produced in 2016, but due to changes made to the structure of the Landsat scenes, only data after 2020 are available. The GLAD AlertDate's pixel value represents the julian day for the first observation flagged as forest loss within the choosed year. According to the methodology developed by GLAD [@hansen2016], Forest loss is defined as the loss of 50% of a pixel's canopy cover. As GLAD AlertDate derives from Landsat images, its spatial resolution is 30 meters. Similarly, the temporal resolution is the same as Landsat which considering the concomitant use of LC8 and LC9 platforms is 8 days.
+
+Based on that data, this work details the method developed to individualize each deforestation and produce the following metrics for them: Persistence, pixel count, tentative final area, completeness index, age and speed of growth, also called by its acronymous *ISDO*, which stands by Individualized Speed of Deforestation Occurrences.
+
+## Persistence
+
+**Persistence** is the number of days during the period in which one deforestation keep growing. Suppose that one deforestation was detected on day 1, and then had a pause between days 26 and 34 and was resumed between day 32 and day 40, and after that, until the end of the current year, no other adjacent pixel suffered any disturbance. In this case, the persistence will be 40 days.
+
+## Pixel Count
+
+**Pixel count** and Tentative Final Area are similar data but with some important differences. As the name suggests, the pixel count represents the number of contiguous pixels detected as deforestation. One pixel is considered contiguous to another when any of the surrounding 8 pixels have also been flagged by GLAD as forest loss. **Tentative Final Area** results from calculating the area of the polygon (Simple Feature) surrounding the contiguous pixels labelled as forest loss. It is important to realize that the value for the Tentative Final Area and the calculated value for Pixel count times 900m^2^ (30x30m) will often differ. This difference is one of the metrics we want to capture, as we will explain further regarding the completeness index. The figure below exemplifies this case where the two area measurements differ.
+
+![Tentative Final Area vs Pixelcount](images/orange-01.png){fig-align="center"}
+
+Orange squares represent the pixels of a GLAD raster; the values range from 103 to 199, representing the Julian day in which the forest loss was flagged. In the Gregorian calendar, these dates represent April-13 and July-18, so the persistence value is 97 days. The shape bounded by the black line is the polygon surrounding the deforestation pixels. The details of the functions used to generate this data are presented in @sec-RCode. One assumption for the present study is that a change in land use to carry out some agricultural activity will generally result in a uniform polygonal feature. Therefore, deforestation has not yet been completed if the forest loss pixels (orange) have not filled the entire polygon (delimited by the black line). It will still be necessary to confirm whether this hypothesis is valid and to what extent. It is important to realize that the surrounding polygon was generated based on the central position of the pixels at the edges of this set of contiguous pixels, which generates conservative values for the area.
+
+## Completeness Index {#sec-CompletenessIndex}
+
+The **completeness index** is the difference between the pixel count and the Tentative Final Area. This value can vary between $\lim_{n \to 0}$ and 4. Values greater than 1 represent a high completeness index, indicating that deforestation [may]{.underline} be complete. Values below 1 [can]{.underline} indicate that there is still forest to be deforested; therefore, it is possible to avoid the felling of more trees if an intervention is made. The words "may" and "can" are underlined because this is not always true, as we will see later on @sec-Discussion.
+
+## Deforestation Age
+
+As can be deduced, the variable **age** represents the age of deforestation in weeks. Its calculus is the result from the time elapsed between the current date (today) and the date of the last pixel labelled as forest loss. This information analyzed in conjunction with the completeness index is important to differentiate active deforestation from those already finished. Considering the costs involved in an inspection on the field which often requires helicopters and heavy logistics, sending the sanctions by mail is more efficient in case of completed deforestation. In contrast, when addressing active deforestation, there will always be the possibility of seizing the equipment used in the environmental infraction and preventing more trees from being cut.
+
+## Individualized Speed of Deforestation Occurrences (ISDO)
+
+The value for the speed of deforestation ***ISDO*****,** came from the result of **pixel count** divided by **persistence** (in days). *ISDO* is expressed in pixels per day. The formula to calculate de individualized speed for deforestation occurrence (*ISDO*) is as follows:
+
+$ISDO=\frac{\sum_{i=1}^{n}x_i}{ld -fd}$
+
+Where:\
+n = amount of contiguous alerts;\
+x = pixel count for each alert;\
+ld = last alert's date;\
+fd = first alert's date
+
+The metrics mentioned above are produced through the steps illustrated in the schema below.
+
+![Information on Forests - Individualized Approach for Metrics on Deforestation Occurrences in GLAD Alerts Workflow](images/IF_I_AM_DOING_Alerts.png)
+
+The processing begins with the function call where the following arguments are passed: country, alerts' year, the minimum number of contiguous pixels desired and the data source name (DSN) where the tiles to be processed are stored.
+
+In step 1, the countries' boundary vector data and the grid of tiles vector are read to memory from the open data site Natural Earth[^3] and my personal GitHub account[^4], respectively. The Grid of tiles was drawn from a linear grid of 10^o^ by 10^o^ also available on Natural Earth web site[^5].
+
+[^3]: <https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/>
+
+[^4]: <https://github.com/georgeportoferreira/ubcdown/blob/main/GLAD_GRID.geojson>
+
+[^5]: <https://www.naturalearthdata.com/downloads/110m-physical-vectors/110m-graticules/>
+
+Step 2 takes the arguments country's name passed in the function call and filter countries' vector data to make a spatial intersection against grid tiles to identify which ones are required to cover the selected country.
+
+In step 3 only the raster tiles from the indicated country are loaded into memory. If no DSN is specified in the function call, the script will download from GLAD webservice at:
+
+<https://storage.googleapis.com/earthenginepartnershansen>/GLADalert/C2/current/ \[**key**\]
+
+The flowing \[**key**\] must be parsed to download the data:
+
+**alertDateYY_DD1H_D1H_DD2H_D2H.tif**
+
+Where:\
+YY is the year (from 21 to 23);\
+DD1 is three numeric digits representing the left limit longitude (from 000 to 180);\
+D1 is two numeric digits representing the bottom limit latitude (from 00 to 90);\
+DD2 is three numeric digits representing the right limit longitude (from 000 to 180);\
+D2 is two numeric digits representing the upper limit latitude (from 00 to 90);\
+H is a one-character letter representing de hemisphere (N/S/E/W). N or S for latitude, E or W for longitude.
+
+In step 4 the raster objects are masked so the processing is carried out only within the indicated country's boundary. The R code to process steps 1 to 4 is available at @sec-LoadandMaskGLADraster
+
+In step 5, the clump function tags contiguous pixels with a unique identifier and counts the number of pixels for each clumped group.
+
+In step 6, the small groups of pixels (small deforestations) are discarded based on the minimum limit of contiguous pixels passed in the function call (R code for steps 5 and 6 at @sec-ClumpAndSieve ).
+
+Step 7 is the one that takes the most time. The maximum and minimum values are collected for each set of contiguous pixels: the start date and the last date on which forest loss in the same clumped group. (R code at @sec-GetStartAndLastDates )
+
+In step 8 all non-NA pixels are converted to Simple Features (points and polygons)(R Code at @sec-CreateGeometry)
+
+The last step creates polygons for each set of points with the same tag (id). These polygons are created using the convex hull (chull()) function. At the end, drawn by the polygons and dates, the attributes *countpixel*, tile, area_vector, persist_days, age_weeks, isdo and completeness_index are calculated and populated into the spatial data frame (R Code at @sec-MainCall )
+
+# R Code {#sec-RCode}
+
+## Steps 1:4 - Load and Mask GLAD raster {#sec-LoadandMaskGLADraster}
+
+```{r, Load and Mask GLAD rasters}
+
+load_masked_glad <- function(country, year, dsn = NA) {
+  countries <- st_read(
+    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson"
+  ) |>
+    dplyr::select(ADMIN, ISO_A3, geometry)
+  glad_tiles <- st_read(
+    "https://raw.githubusercontent.com/georgeportoferreira/ubcdown/main/GLAD_GRID.geojson"
+  )
+  countries <- countries[which(!is.na(lapply(
+    st_intersects(st_make_valid(countries), glad_tiles, sparse = TRUE),
+    first
+  ))), ]
+  if (country %in% countries$ADMIN) {
+    aoi <- countries[countries$ADMIN == country, ]$geometry
+  } else if (country %in% countries$ISO_A3) {
+    aoi <- countries[countries$ISO_A3 == country, ]$geometry
+  } else {
+    return(print("No data for selected country"))
+  }
+  tiles_country <- st_intersects(glad_tiles, aoi, sparse = FALSE)
+  selected_tiles <- glad_tiles[tiles_country, ]$id
+  list_of_raster_glad <- as.list(NULL)
+  length_selected_tiles <- length(selected_tiles)
+  if (!is.na(dsn)) {
+    for (i in 1:length_selected_tiles) {
+      print(paste0(
+        "Loading from disk tile ", i, "/", length_selected_tiles, " at ", Sys.time()
+      ))
+      list_of_raster_glad[[i]] <- mask(raster(paste0(
+        dsn, "/alertDate", substr(year, 3, 4), "_", selected_tiles[i], ".tif"
+      )), as_Spatial(aoi))
+    }
+  } else {
+    for (i in 1:length_selected_tiles) {
+      print(paste0("Downloading tile ", i, "/", length_selected_tiles, " at ", Sys.time()))
+      list_of_raster_glad[[i]] <- mask(raster(paste0(
+        "https://storage.googleapis.com/earthenginepartners-hansen/GLADalert/C2/current/alertDate",
+        substr(year, 3, 4), "_", selected_tiles[i], ".tif"
+      )), as_Spatial(aoi))
+    }
+  }
+  return(list_of_raster_glad)
+}
+
+```
+
+## Steps 5:6 - Clump and Sieve {#sec-ClumpAndSieve}
+
+```{r, Clump and Sieve}
+
+clump_n_sieve <- function(list_of_rasters, pixels = 16) {
+  list_of_clumped <- as.list(NULL)
+  list_of_sieved <- as.list(NULL)
+  list_of_f_sieved <- as.list(NULL)
+  length_list_of_rasters <- length(list_of_rasters)
+  for (i in 1:length_list_of_rasters) {
+    print(paste0("Clumping tile ", i, "/", length_list_of_rasters, " at ", Sys.time()))
+    list_of_clumped[[i]] <- clump(list_of_rasters[[i]], progress = "text")
+    print(paste0("Stats for clumped ", i, "/", length_list_of_rasters, " at ", Sys.time()))
+    f_clumped_glad <- as.data.frame(
+      freq(list_of_clumped[[i]], useNA = "no", progress = "text")
+    )
+    sieved_glad <- list_of_clumped[[i]]
+    print(paste0("Sieving tile ", i, "/", length_list_of_rasters, " at ", Sys.time()))
+    excludeID <- f_clumped_glad$value[which(f_clumped_glad$count <= pixels)]
+    sieved_glad[list_of_clumped[[i]] %in% excludeID] <- NA
+    print(paste0("Stats for sieved ", i, "/", length_list_of_rasters, " at ", Sys.time()))
+    list_of_f_sieved[[i]] <- as.data.frame(
+      freq(sieved_glad, useNA = "no", progress = "text")
+    )
+    list_of_sieved[[i]] <- sieved_glad
+  }
+  return(list(list_of_sieved, list_of_f_sieved))
+}
+
+```
+
+## Step 7 - Get start and last dates {#sec-GetStartAndLastDates}
+
+```{r, Get start and last dates, eval = FALSE}
+
+get_start_last_date <- function(glad_raster, sieved_glad, year) {
+  start_last_d <- as.list(NULL)
+  length_sieved_glad <- length(sieved_glad[[2]])
+  for (i in 1:length_sieved_glad) {
+    print(paste0("Processing Tile ", i, "/", length_sieved_glad, " for dates at ", Sys.time()))
+    if (sieved_glad[[1]][[i]]@data@min == Inf) next
+    sieved_matrix <- as.matrix(sieved_glad[[1]][[i]])
+    glad_matrix <- as.matrix(glad_raster[[i]])
+    start_last_dates <- data.frame(
+      id = as.numeric(NA),
+      start = as.POSIXct.Date(NA),
+      last = as.POSIXct.Date(NA),
+      countpixel = as.numeric(NA)
+    )
+    nrow_sieved_glad <- nrow(sieved_glad[[2]][[i]])
+    for (j in 1:nrow_sieved_glad) {
+      start_last_dates[j, ] <- c(
+        sieved_glad[[2]][[i]][j, 1],
+        strftime(as.Date(
+          min(glad_matrix[which(
+            sieved_matrix[] == sieved_glad[[2]][[i]][j, 1]
+          )]),
+          origin = paste0(year, "-01-01")
+        ), format = "%Y-%m-%d"),
+        strftime(as.Date(
+          max(glad_matrix[which(
+            sieved_matrix[] == sieved_glad[[2]][[i]][j, 1]
+          )]),
+          origin = paste0(year, "-01-01")
+        ), format = "%Y-%m-%d"),
+        sieved_glad[[2]][[i]][j, 2]
+      )
+      print(paste0(
+        "Tile ", i, "/", length_sieved_glad,
+        " collecting date ", j, "/", nrow_sieved_glad, " at ", Sys.time()
+      ))
+    }
+    start_last_d[[i]] <- start_last_dates
+  }
+  return(start_last_d)
+}
+
+```
+
+## Step 8 - Create geometry {#sec-CreateGeometry}
+
+```{r, Create geometry, eval = FALSE}
+
+create_geometry_deforestation <- function(sieved_glad) {
+  list_of_deforestation <- as.list(NULL)
+  length_sieved_glad <- length(sieved_glad[[1]])
+  for (j in 1:length_sieved_glad) {
+    print(paste0(
+      "Processing Tile ", j, "/", length_sieved_glad, " for deforestation  at ", Sys.time()
+    ))
+    if (sieved_glad[[1]][[j]]@data@min == Inf) next
+    vetor <- st_sf(data.frame(
+      id = as.numeric(NA),
+      tile = as.character(NA),
+      geometry = st_sfc(st_polygon())
+    ))
+    print("Converting raster to points")
+    points <- rasterToPoints(sieved_glad[[1]][[j]], progress = TRUE)
+    ids <- unique(points[, 3])
+    tile <- as.character(extent(sieved_glad[[1]][[j]]))
+    length_ids <- length(ids)
+    print("Creating polygon geometries")
+    for (i in 1:length_ids) {
+      print(paste0(
+        "Deforestation ", i, "/", length_ids,
+        " from tile ", j, "/", length_sieved_glad, " at ", Sys.time()
+      ))
+      ch <- points[which(points[, 3] == ids[i]), 1:2][, 1:2]
+      geometry <- st_polygon(list(ch[c(chull(ch), chull(ch)[1]), ]))
+      vetor[i, ] <- c(ids[i], tile, st_geometry(geometry))
+    }
+    list_of_deforestation[[j]] <- vetor
+  }
+  return(list_of_deforestation)
+}
+
+```
+
+## Step 9 - Main call and attribute creation {#sec-MainCall}
+
+```{r, Main call and attribute creation, eval = FALSE}
+
+isdo <- function(country, year, pixels = 16, dsn = NA) {
+  print(paste0("PROCESS 1/5 - Loading and masking tiles at ", Sys.time()))
+  tiles <- load_masked_glad(country, year, dsn)
+  if (is.character(tiles)) {
+    return(print(tiles))
+  } else {
+    print(paste0("PROCESS 2/5 - Clumping and sieving tiles at ", Sys.time()))
+    clumped_sieved <- clump_n_sieve(tiles, pixels)
+    print(paste0("PROCESS 3/5 - Colecting dates at", Sys.time()))
+    dates <- get_start_last_date(tiles, clumped_sieved, year)
+    rm(tiles)
+    print(paste0("PROCESS 4/5 - Creating deforestation geometry at", Sys.time()))
+    deforestation <- create_geometry_deforestation(clumped_sieved)
+    print(paste0("PROCESS 5/5 - Gathering results at", Sys.time()))
+    isdo_result <- cbind(do.call("rbind", dates), do.call("rbind", deforestation))
+    st_crs(isdo_result$geometry) <- 4326
+    isdo_result <- isdo_result[-5] %>%
+      mutate(
+        area_vector = st_area(.$geometry),
+        persist_days = as.numeric(trunc(difftime(
+          isdo_result$last, isdo_result$start,
+          units = "day"
+        )) + 1),
+        age_weeks = as.numeric(round(difftime(Sys.Date(), isdo_result$last, units = "week"))),
+        isdo = round(as.numeric(countpixel) / as.numeric(persist_days), 2),
+        completeness_index = round(as.numeric(countpixel) * 900 / area_vector, 1)
+      )
+    return(isdo_result[, c(1:5, 7:11, 6)])
+  }
+}
+
+```
+
+# Results
+
+The code generated all the attributes and geometries as expected. Sets of data resulting from the script were produced for the following countries with the respective amounts of tiles processed: Suriname (1), Dominican Republic (2), Guyana (2), Ecuador (4) and Brazil (17). To process the year 2022 for Brazil, with a minimum limit of 1111 contiguous pixels, it took almost 20 hours to finish all 17 tiles. For the year 2022, 2089 deforestation occurrences with more than 1111 contiguous pixels were found. The equipment used was a workstation with an i9 processor, 128 Gb of RAM and 1 TB of free disk space provided by Professor Naomi Schwartz of the Geospatial Ecology Laboratory.
+
+The Box-plots below show the individualized speed of deforestation for each of the five countries processed.
+
+```{r, Boxplot, echo=FALSE}
+
+five_countries <- st_read(
+  "https://raw.githubusercontent.com/georgeportoferreira/ubcdown/main/five_countries.geojson",
+  quiet = TRUE
+)
+
+{par(cex = 0.75, tcl = -0.2, mgp = c(2, 0.5, 0))
+boxplot(isdo ~ country,
+  data = five_countries,
+  ylab = "Speed of deforestation (pixles per day)",
+  xlab = "",
+  ylim = c(0, 36)
+)
+}
+
+```
+
+One of the great strengths of using GLAD data is its coverage which encompasses any forest-sized vegetation. Thus, data on biomes outside the Amazon are also available. In the box plots below, we present ISDO for all Brazilian states with forest loss in 2022 with more than 1111 contiguous pixels. In addition to the states of the Amazon Forest (Blue box plots), the other nine states are also presented (in grey).
+
+```{r, Box plots Brasil, echo=FALSE}
+
+box_colour <- ifelse(unique(five_countries$uf) %in%
+  c("AM", "AP", "AC", "PA", "MT", "RO", "RR", "TO", "MA"),
+"grey",
+"lightblue"
+)
+par(cex = 0.75, tcl = -0.2, mgp = c(2, 0.5, 0))
+dplyr::filter(five_countries, country == "Brasil") %>%
+  boxplot(isdo ~ uf,
+    data = .,
+    ylab = "Speed of deforestation (pixles per day)",
+    xlab = "Brazilian states",
+    ylim = c(0, 49),
+    col = box_colour
+  )
+
+```
+
+To exemplify the vector data produced by the script, below we plot a one-polygon static map.
+
+```{r, Polygon example, echo=FALSE}
+
+id_73RD <- five_countries$geometry[which(
+  five_countries$id == 73 & five_countries$country == "Republica Dominicana"
+)]
+alertDate22_080W_10N_070W_20N_id73_RD <- crop(raster(
+  "https://storage.googleapis.com/earthenginepartners-hansen/GLADalert/C2/current/alertDate22_080W_10N_070W_20N.tif",
+), as_Spatial(id_73RD))
+
+# Static Map for ID 73 Dominican Republic
+
+plot(id_73RD)
+plot(alertDate22_080W_10N_070W_20N_id73_RD, add = TRUE)
+plot(id_73RD, add = TRUE)
+
+# Attribute table for Polygon ID 73
+
+as.data.frame(five_countries[2569,]) %>% 
+  dplyr::select(c(1:4, 6:10)) %>%
+  head() %>%
+  knitr::kable(col.names = c(
+    "Id", "Start", "Last", "C-pixel", "Area m2", "persist", "age", "isdo", "completness-index"
+  ))
+
+```
+
+Dynamic maps are also available running the code chunk below in Rstudio.
+
+```{r, Dynamica maps, eval=FALSE}
+
+# Dynamic Map for ID 73 Dominican Republic
+leaflet(st_as_sf(five_countries$geometry[which(
+  five_countries$id == 73 & five_countries$country == "Republica Dominicana"
+)])) %>%
+  addTiles() %>%
+  addPolygons(stroke = TRUE, color = "yellow", fill = FALSE, popup = ~ paste(
+    "id: ", five_countries$id,
+    "start: ", five_countries$start,
+    "last: ", five_countries$last,
+    "countpixel: ", five_countries$countpixel,
+    "area_vector: ", five_countries$area_vector,
+    "persist_days: ", five_countries$persist_days,
+    "age_weeks: ", five_countries$age_weeks,
+    "isdo: ", five_countries$isdo,
+    "completeness_index: ", five_countries$completeness_index
+  )) %>%
+  addRasterImage(alertDate22_080W_10N_070W_20N_id73_RD, opacity = 0.8)
+
+# Dinamic Map for all polygons
+leaflet(st_as_sf(five_countries)) %>%
+  addTiles(urlTemplate = "https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}") %>%
+  addPolygons(stroke = TRUE, color = "yellow", fill = FALSE, popup = ~ paste(
+    "id: ", five_countries$id,
+    "start: ", five_countries$start,
+    "last: ", five_countries$last,
+    "countpixel: ", five_countries$countpixel,
+    "area_vector: ", five_countries$area_vector,
+    "persist_days: ", five_countries$persist_days,
+    "age_weeks: ", five_countries$age_weeks,
+    "isdo: ", five_countries$isdo,
+    "completeness_index: ", five_countries$completeness_index
+  ))
+
+```
+
+The focus of this study is on building a set of new information related to each individual deforestation aiming to allow a better understanding of deforestation dynamics and, consequently, provide tools to policymakers and environmental agencies to put in place the best strategies to tackle deforestation. The results in the table below, present some new useful data to accomplish this mission.
+
+```{r, echo=FALSE}
+
+as.data.frame(five_countries) %>%
+  dplyr::select(c(1:4, 6:10)) %>%
+  head() %>%
+  knitr::kable(col.names = c(
+    "Id", "Start", "Last", "C-pixel", "Area m2", "persist", "age", "isdo", "completness-i"
+  ))
+
+```
+
+One assumption we have in this study is: the fast one deforestation grows, the bigger it will be. In order to identify if there is any correlation between *ISDO* and final size of deforestation the first analysis to do is to fit the regression model using the *response* variable as *countpixel* and *predictor* variable as *ISDO*. The scatter plots are presented as follow.
+
+```{r, Scatter plot, echo=FALSE}
+
+mod <- lm(countpixel ~ isdo, data = five_countries)
+
+{
+  plot(countpixel ~ isdo,
+    data = five_countries,
+    pch = 16,
+    col = rgb(0.2, 0.2, 1.0, alpha = 0.2),
+    xlab = "Individualized speed of Deforestation Occurrences (pixels p/ day)",
+    ylab = "Deforestation Area (in pixels)",
+    xlim = c(0, 300),
+    ylim = c(0, 20000)
+  )
+  abline(mod)
+}
+
+ggplot(five_countries, aes(x = isdo, y = mod$residuals)) +
+  geom_point(col = "red", alpha = 0.2) +
+  geom_hline(yintercept = 0, lty = 2) +
+  # geom_smooth(se = FALSE, colour = "black")
+  labs(
+    x = "Individualized speed of Deforestation Occurrences (pixels p/ day)",
+    y = "Residuals"
+  ) +
+  lims(x = c(0, 300), y = c(-15000, 30000))
+
+```
+
+The scatter plots show high heteroscedasticity having a megaphone shape. Further analyses will be done to understand better if there is any correlation.
+
+The histogram is right-skewed and the long tail suggests that in further analyses, we could perform an outlier treatment.
+
+```{r, echo=FALSE}
+
+cp <- seq(0, 1500, 5)
+hist(five_countries$isdo,
+  breaks = 50,
+  # xlim = c(0,100),
+  xlab = "Individualized speed of Deforestation Occurrences (pixels p/ day)",
+  main = ""
+)
+```
+
+Analyzing the summary below, we noticed that R-Squared is low `r round(summary(mod)$r.squared,3)`. Considering that the values of *countpixel* are used to calculate *ISDO*, further investigation should be done to verify if there is any autocorrelation. En bref, more statistical analyses should be done to confirm or reject the correlation hypothesis between the deforestation area and *ISDO*.
+
+```{r, Summary, echo=FALSE}
+summary(mod)
+```
+
+# Discussion {#sec-Discussion}
+
+The code needs to be refactored to engage less memory. Considering the willingness to use this script in environmental agencies worldwide, the processing time would not be a limiting factor because GLAD Alerts are available only every eight days.
+
+Some caveats are highlighted below regarding the data generated by the script.
+
+Pixel count - To facilitate the calculations, in the present introductory work, we assigned to all pixels an area of 900 m². However, when using a flat projection, this value decreases as we move away from the equator. In further developments, this script would take that correction factor into account.
+
+Completeness Index -- As previously explained in @sec-CompletenessIndex, values less than 1 [may]{.underline} indicate that there is still forest to be cleared. The word "may" is underlined because this index will fail if deforestation is carried out as an open shutter or if the clear-cut is made for road constructions containing axis in different directions (roads with curves, for example).
+
+Age - This analysis does not consider non-observed data caused by clouds' cover. Thus the date identified as the last's activity date used in the attributes "last" and "age_weeks" can have two different meanings: if satellite observations after the date in "last" are free of clouds, "last" means that deforestation activity has been interrupted. However, if there is no clear satellite image (without clouds) after the "last" date, it may or may not mean deforestation has been halted. Certainty will come when a new cloudless image in the following weeks is acquired.
+
+The difference between the convex hull and the pixel quantity does not always indicate that deforestation has not yet been completed.
+
+Further analysis can explore the proximity to other polygons, as they may become the same deforestation.
+
+Further analysis should also focus on the initial speed of deforestation, not the speed comprising the entire period for one specific deforestation. A split-sample model testing can be applied to verify the ability to forecast the final size of deforestation drawn by *ISDO*.
+
+# Conclusions
+
+The script succeeded in calculating the Individualized Speed of Deforestation Occurrences. A new set of information for each single deforestation spot ongoing inside the equatorial belt is ready to be generetad on weekly basis.
+
+This study is the beginning of broader research to help tackle deforestation worldwide. The approach presented here is unprecedented and may promote a redirection of climate change mitigation policies in tropical countries. Preventing biodiversity and carbon sinks from being plundered before our eyes is a task that requires a change in habits but also the courage to innovate. Hopefully, this research will give this planet and the beings living on it a new lease on life. Fighting deforestation by focusing on the influential people who profit from the death of the forest is, above all, an act of social justice. Due to the Climate Emergency, we all are experiencing, tackling illegal deforestation is urgent, essential and cannot be put off any longer.
+
+# Appendices
+
+Processed data from Dominican Republic, Suriname, Ecuador, Guyana and Brazil are available at\
+<https://raw.githubusercontent.com/georgeportoferreira/ubcdown/main/five_countries.geojson>
+
+Countries boundary available at\
+<https://www.naturalearthdata.com/downloads/10m-cultural-vectors/10m-admin-0-countries/>
+
+Grid of GLAD Tiles available at\
+<https://github.com/georgeportoferreira/ubcdown/blob/main/GLAD_GRID.geojson>
+
+# References {.unnumbered}
