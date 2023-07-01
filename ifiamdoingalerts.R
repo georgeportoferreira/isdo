@@ -1,24 +1,35 @@
 library(terra)
 library(sf)
 library(tidyverse)
+library(geodata)
+
 
 terraOptions(datatype = "INT4U")
 
 select_tiles <- function(country, year) {
-  countries <- vect(st_read(
-    "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_countries.geojson",
-    quiet = TRUE
-  ) |>
-    dplyr::select(ADMIN, ISO_A3, geometry))
-  glad_tiles <- vect(st_read(
-    "https://raw.githubusercontent.com/georgeportoferreira/ubcdown/main/GLAD_GRID.geojson",
-    quiet = TRUE
-  ))
+  countries <- world(path = getwd())
+  glad_tiles <- st_make_grid(what = "polygons") %>% st_as_sf()
+  glad_tiles$bbox <- lapply(glad_tiles$x, "st_bbox")
+  glad_tiles <- vect(glad_tiles)
+  glad_tiles$EWmin <- ifelse(str_detect(glad_tiles$bbox, "xmin = -"), 'W', "E")
+  glad_tiles$NSmin <- ifelse(str_detect(glad_tiles$bbox, "ymin = -"), 'S', "N")
+  glad_tiles$EWmax <- ifelse(str_detect(glad_tiles$bbox, "xmax = -"), 'W', "E")
+  glad_tiles$NSmax <- ifelse(str_detect(glad_tiles$bbox, "ymax = -"), 'S', "N")
+  glad_tiles$xmax <- str_pad(str_extract(str_extract(glad_tiles$bbox, 'xmax = -*\\d+'), '\\d+'), 3, "left", "0")
+  glad_tiles$xmin <- str_pad(str_extract(str_extract(glad_tiles$bbox, 'xmin = -*\\d+'), '\\d+'), 3, "left", "0")
+  glad_tiles$ymax <- str_pad(str_extract(str_extract(glad_tiles$bbox, 'ymax = -*\\d+'), '\\d+'), 2, "left", "0")
+  glad_tiles$ymin <- str_pad(str_extract(str_extract(glad_tiles$bbox, 'ymin = -*\\d+'), '\\d+'), 2, "left", "0")
+  glad_tiles$id <- paste0(
+    glad_tiles$xmin, glad_tiles$EWmin, '_',
+    glad_tiles$ymin, glad_tiles$NSmin, '_',
+    glad_tiles$xmax, glad_tiles$EWmax, '_',
+    glad_tiles$ymax, glad_tiles$NSmax
+  )
   countries <- countries[unique(relate(countries, glad_tiles, "intersects", pairs = TRUE)[, 1])]
-  if (country %in% countries$ADMIN & year > 2020) {
-    aoi <- countries[countries$ADMIN == country, ]
-  } else if (country %in% countries$ISO_A3 & year > 2020) {
-    aoi <- countries[countries$ISO_A3 == country, ]
+  if (country %in% countries$NAME_0 & year > 2020) {
+    aoi <- countries[countries$NAME_0 == country, ]
+  } else if (country %in% countries$GID_0 & year > 2020) {
+    aoi <- countries[countries$GID_0 == country, ]
   } else {
     return(print("No data for selected country or year"))
   }
@@ -43,7 +54,6 @@ load_n_mask <- function(selected_tile, aoi, year, dsn = NA) {
 
 ## Steps 5:6 - Clump and Sieve {#sec-ClumpAndSieve}------------
 
-
 clump_n_sieve <- function(masked_glad, pixels = 16) {
   if (is.na(minmax(masked_glad)[2])) {
     return(print("No clumps for current tile"))
@@ -61,8 +71,6 @@ clump_n_sieve <- function(masked_glad, pixels = 16) {
   }
 }
 
-
-
 ## Step 7 - Get start and last dates {#sec-GetStartAndLastDates}---------
 
 get_first_last_date <- function(glad_raster, deforestation, clumped, year) {
@@ -79,19 +87,20 @@ get_first_last_date <- function(glad_raster, deforestation, clumped, year) {
   c_cells <- terra::extract(clumped[[1]], deforestation, cells = TRUE, na.rm = TRUE, ID = FALSE, exact = TRUE) %>% filter(fraction > 0.5)
   cr_cells <- full_join(r_cells, c_cells, by = "cell")
   names(cr_cells) <- c("date", "cell", "drop1", "patches", "drop2")
-  first_last_dates <- left_join(first_last_dates, cr_cells, by = c("clump_id" = "patches", "first" = "date")) %>%
+  first_last_dates <- left_join(first_last_dates, cr_cells, join_by(clump_id == patches)) %>%
     group_by(clump_id) %>%
     summarise(first = first(first), last = first(last), tile = first(tile), id = first(cell)) %>%
     ungroup()
   first_last_dates <- mutate(first_last_dates,
-    first = as.numeric(as.Date(first, origin = paste0(year, "-01-01"))),
-    last = as.numeric(as.Date(last, origin = paste0(year, "-01-01"))),
+    first = as.character(as.Date(first, origin = paste0(year, "-01-01"))),
+    last = as.character(as.Date(last, origin = paste0(year, "-01-01"))),
+    id = as.character(id)
   )
   return(first_last_dates[, c(5, 2:4)])
 }
 
 ## Step 8 - Create Gald GRID ----------------
-creat_grid <- function() {
+create_grid <- function() {
   xvertline <- rep(seq(-110, 170, 10), 1, each = 2)
   yvertline <- rep(c(40, -50), 29)
   object <- rep(1:29, each = 2)
@@ -143,6 +152,8 @@ recursive_dissolve <- function(bound_pol) {
   }
 }
 
+
+
 ## Step 10 - Main call and attribute creation -------------
 
 isdo <- function(country, year, pixels = 16, dsn = NA) {
@@ -177,38 +188,27 @@ isdo <- function(country, year, pixels = 16, dsn = NA) {
   deforestation <- deforestation[!sapply(deforestation, is.null)]
   dates <- do.call("rbind", dates)
   deforestation <- do.call("rbind", deforestation)
-  dates <- dates %>%
-    mutate(
-      persist_days = as.numeric(trunc(difftime(
-        as.Date(last), as.Date(first),
-        units = "day"
-      )) + 1),
-      age_weeks = as.numeric(round(difftime(Sys.Date(), as.Date(last), units = "week"))),
-    )
   values(deforestation) <- dates
   print(paste0("PROCESS deforestation on tile boundry at ", format(Sys.time(), "%b %d %X")))
-  gladlinegrid <- creat_grid()
+  gladlinegrid <- create_grid()
   treat_at_boundries <- deforestation[relate(deforestation, gladlinegrid, "touches", pairs = TRUE)[, 1]]
-  treated_at_boundries <- recursive_dissolve(treat_at_boundries)
-  treated_at_boundries <- st_join(st_as_sf(treated_at_boundries), st_as_sf(treat_at_boundries)) %>%
-    reframe(
-      .by = geometry,
-      id = list(id.y),
-      tile = list(tile.y),
-      first = min(first.y),
-      last = max(last.y),
-      age_weeks = min(age_weeks.y)
-    ) %>%
-    mutate(persist_days = as.numeric(trunc(difftime(
-      as.Date(last), as.Date(first),
-      units = "day"
-    )) + 1))
-  deforestation <- erase(deforestation, treat_at_boundries)
-  treated <- vect(treated_at_boundries$geometry)
-  values(treated) <- treated_at_boundries[2:7]
-  deforestation <- rbind(deforestation, treated)
-  deforestation$f <- as.Date(deforestation$first)
-  deforestation$l <- as.Date(deforestation$last)
+  if (length(treat_at_boundries) > 0) {
+    treated_at_boundries <- recursive_dissolve(treat_at_boundries)
+    treated_at_boundries <- st_join(st_as_sf(treated_at_boundries), st_as_sf(treat_at_boundries)) %>%
+      reframe(
+        .by = geometry,
+        id = list(id.y),
+        tile = list(tile.y),
+        first = min(first.y),
+        last = max(last.y),
+      )
+    deforestation <- erase(deforestation, treat_at_boundries)
+    treated <- vect(treated_at_boundries$geometry)
+    values(treated) <- treated_at_boundries[2:5]
+    deforestation <- rbind(deforestation, treated)
+  }
+  deforestation$persist_days <- as.numeric(trunc(difftime(deforestation$last, deforestation$first, units = "day")) + 1)
+  deforestation$age_weeks <- as.numeric(round(difftime(Sys.Date(), deforestation$last, units = "week")))
   deforestation$current_area <- expanse(deforestation, unit = "ha")
   deforestation <- fillHoles(deforestation)
   deforestation$intended_area <- expanse(deforestation, unit = "ha")
