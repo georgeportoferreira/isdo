@@ -42,14 +42,17 @@ load_n_mask <- function(selected_tile, aoi, dsn = NA) {
     paste0(dsn, "/", selected_tile$tile_id, ".tif")
   )
   print(paste0(" - ", ifelse(is.na(dsn), "Downloading", "Reading from disk"), " and masking tile at ", format(Sys.time(), "%b %d %X")))
-  raster_glad <- crop(rast(file_path_date), aoi, mask = TRUE)
-  return(raster_glad)
+  raster_glad <- rast(file_path_date)
+  ifelse(is.na(minmax(raster_glad)[2]),
+    return(print("Void Raster")),
+    return(crop(raster_glad, aoi, mask = TRUE))
+  )
 }
 
 ## Steps 5:6 - Clump and Sieve {#sec-ClumpAndSieve}------------
 
 clump_n_sieve <- function(masked_glad, pixels = 16) {
-  if (minmax(masked_glad)[2] == 0) {
+  if (is.na(minmax(masked_glad)[2])) {
     return(print("No clumps for current tile"))
   } else {
     clumped <- patches(masked_glad, directions = 8, zeroAsNA = TRUE)
@@ -57,7 +60,9 @@ clump_n_sieve <- function(masked_glad, pixels = 16) {
   }
   if (any(f_clumped$count >= pixels)) {
     excludeID <- f_clumped$value[which(f_clumped$count < pixels)]
-    clumped[clumped %in% excludeID] <- NA
+    if(!is_empty(excludeID)){ #check if there is no small clumps to avoid error
+      clumped[clumped %in% excludeID] <- NA
+    }
     f_clumped <- filter(f_clumped, count >= pixels)
     return(list(clumped, f_clumped))
   } else {
@@ -163,22 +168,26 @@ isdo <- function(country, pixels = 16, dsn = NA) {
   if (is.character(tiles)) {
     return(tiles)
   }
-  length_tiles <- length(tiles[[1]])
+  length_tiles <- length(tiles[[1]]$tile_id)
   dates <- as.list(NA)
   deforestation <- as.list(NA)
   clumped_sieved <- as.list(NA)
   for (i in 1:length_tiles) {
     print(paste0("PROCESS Tile ", i, "/", length_tiles, " - Load and mask tile at ", format(Sys.time(), "%b %d %X")))
     masked_glad <- load_n_mask(tiles[[1]][i, ], tiles[[2]], dsn)
-    print(paste0("PROCESS Tile ", i, "/", length_tiles, " - Clump and sieve tile at ", format(Sys.time(), "%b %d %X")))
-    clumped_sieved <- clump_n_sieve(masked_glad, pixels)
-    if (is.character(clumped_sieved)) {
+    if (is.character(masked_glad)) {
       next
     } else {
-      print(paste0("PROCESS Tile ", i, "/", length_tiles, " - Create deforestation geometry at ", format(Sys.time(), "%b %d %X")))
-      deforestation[[i]] <- as.polygons(clumped_sieved[[1]])
-      print(paste0("PROCESS Tile ", i, "/", length_tiles, " - Colect dates at ", format(Sys.time(), "%b %d %X")))
-      dates[[i]] <- get_first_last_date(masked_glad, deforestation[[i]], clumped_sieved)
+      print(paste0("PROCESS Tile ", i, "/", length_tiles, " - Clump and sieve tile at ", format(Sys.time(), "%b %d %X")))
+      clumped_sieved <- clump_n_sieve(masked_glad, pixels)
+      if (is.character(clumped_sieved)) {
+        next
+      } else {
+        print(paste0("PROCESS Tile ", i, "/", length_tiles, " - Create deforestation geometry at ", format(Sys.time(), "%b %d %X")))
+        deforestation[[i]] <- as.polygons(clumped_sieved[[1]])
+        print(paste0("PROCESS Tile ", i, "/", length_tiles, " - Colect dates at ", format(Sys.time(), "%b %d %X")))
+        dates[[i]] <- get_first_last_date(masked_glad, deforestation[[i]], clumped_sieved)
+      }
     }
   }
   print(paste0("Gather results at ", format(Sys.time(), "%b %d %X")))
@@ -239,4 +248,51 @@ isdo <- function(country, pixels = 16, dsn = NA) {
   }
   print(paste("Processing finished successfully after ", format(round(difftime(Sys.time(), start_processing)), 1)))
   return(deforestation)
+}
+
+# Process all countries -------------------------
+
+countries <- world(path = tempdir())
+glad_tiles <- st_make_grid(what = "polygons") %>% st_as_sf()
+glad_tiles$bbox <- lapply(glad_tiles$x, "st_bbox")
+glad_tiles <- vect(glad_tiles)
+glad_tiles$EWmin <- ifelse(str_detect(glad_tiles$bbox, "xmin = -"), "W", "E")
+glad_tiles$NSmin <- ifelse(str_detect(glad_tiles$bbox, "ymin = -"), "S", "N")
+glad_tiles$EWmax <- ifelse(str_detect(glad_tiles$bbox, "xmax = -"), "W", "E")
+glad_tiles$NSmax <- ifelse(str_detect(glad_tiles$bbox, "ymax = -"), "S", "N")
+glad_tiles$xmax <- str_pad(str_extract(str_extract(glad_tiles$bbox, "xmax = -*\\d+"), "\\d+"), 3, "left", "0")
+glad_tiles$xmin <- str_pad(str_extract(str_extract(glad_tiles$bbox, "xmin = -*\\d+"), "\\d+"), 3, "left", "0")
+glad_tiles$ymax <- str_pad(str_extract(str_extract(glad_tiles$bbox, "ymax = -*\\d+"), "\\d+"), 2, "left", "0")
+glad_tiles$ymin <- str_pad(str_extract(str_extract(glad_tiles$bbox, "ymin = -*\\d+"), "\\d+"), 2, "left", "0")
+glad_tiles$id <- paste0(
+  glad_tiles$xmin, glad_tiles$EWmin, "_",
+  glad_tiles$ymin, glad_tiles$NSmin, "_",
+  glad_tiles$xmax, glad_tiles$EWmax, "_",
+  glad_tiles$ymax, glad_tiles$NSmax
+)
+glad_tiles <- subset(glad_tiles, glad_tiles$id %in% c("000E_00N_010E_10N", "000E_10N_010E_20N", "000E_10S_010E_00N", "000E_20N_010E_30N", "010E_00N_020E_10N", "010E_10N_020E_20N", "010E_10S_020E_00N", "010E_20N_020E_30N", "010E_20S_020E_10S", "010E_30S_020E_20S", "010W_00N_000E_10N", "010W_10N_000E_20N", "010W_20N_000E_30N", "020E_00N_030E_10N", "020E_10N_030E_20N", "020E_10S_030E_00N", "020E_20N_030E_30N", "020E_20S_030E_10S", "020E_30S_030E_20S", "020W_00N_010W_10N", "020W_10N_010W_20N", "020W_20N_010W_30N", "030E_00N_040E_10N", "030E_10N_040E_20N", "030E_10S_040E_00N", "030E_20N_040E_30N", "030E_20S_040E_10S", "030E_30S_040E_20S", "030W_10N_020W_20N", "040E_00N_050E_10N", "040E_10N_050E_20N", "040E_10S_050E_00N", "040E_20N_050E_30N", "040E_20S_050E_10S", "040E_30S_050E_20S", "040W_10S_030W_00N", "040W_20S_030W_10S", "050E_00N_060E_10N", "050E_10N_060E_20N", "050E_10S_060E_00N", "050E_20N_060E_30N", "050E_20S_060E_10S", "050E_30S_060E_20S", "050W_00N_040W_10N", "050W_10S_040W_00N", "050W_20S_040W_10S", "050W_30S_040W_20S", "060E_20N_070E_30N", "060W_00N_050W_10N", "060W_10N_050W_20N", "060W_10S_050W_00N", "060W_20S_050W_10S", "060W_30S_050W_20S", "060W_40S_050W_30S", "070E_00N_080E_10N", "070E_10N_080E_20N", "070E_20N_080E_30N", "070W_00N_060W_10N", "070W_10N_060W_20N", "070W_10S_060W_00N", "070W_20S_060W_10S", "070W_30S_060W_20S", "080E_00N_090E_10N", "080E_10N_090E_20N", "080E_20N_090E_30N", "080W_00N_070W_10N", "080W_10N_070W_20N", "080W_10S_070W_00N", "080W_20N_070W_30N", "080W_20S_070W_10S", "080W_30S_070W_20S", "090E_00N_100E_10N", "090E_10N_100E_20N", "090E_10S_100E_00N", "090E_20N_100E_30N", "090W_00N_080W_10N", "090W_10N_080W_20N", "090W_10S_080W_00N", "090W_20N_080W_30N", "100E_00N_110E_10N", "100E_10N_110E_20N", "100E_10S_110E_00N", "100E_20N_110E_30N", "100W_10N_090W_20N", "100W_20N_090W_30N", "110E_00N_120E_10N", "110E_10N_120E_20N", "110E_10S_120E_00N", "110E_20N_120E_30N", "110E_20S_120E_10S", "110E_30S_120E_20S", "110W_10N_100W_20N", "110W_20N_100W_30N", "120E_00N_130E_10N", "120E_10N_130E_20N", "120E_10S_130E_00N", "120E_20N_130E_30N", "120E_20S_130E_10S", "120E_30S_130E_20S", "120W_20N_110W_30N", "130E_00N_140E_10N", "130E_10S_140E_00N", "130E_20N_140E_30N", "130E_20S_140E_10S", "130E_30S_140E_20S", "140E_10S_150E_00N", "140E_20S_150E_10S", "140E_30S_150E_20S", "150E_10S_160E_00N", "150E_20S_160E_10S", "150E_30S_160E_20S", "160E_10S_170E_00N", "160E_20S_170E_10S", "160E_30S_170E_20S", "170E_20S_180E_10S"))
+countries <- countries[unique(relate(countries, glad_tiles, "intersects", pairs = TRUE)[, 1])]
+countries <- countries$NAME_0
+
+# Cedar
+# for (country in countries) {
+#   print(country)
+#   desmatamento <- isdo(country, pixel = 16)
+#   if (is.character(desmatamento)) {
+#     next
+#   } else {
+#     writeVector(desmatamento, paste0("/home/gorg/GLAD/", country, ".geojson"), filetype = "GeoJSON")
+#   }
+# }
+
+
+# Lenovo
+for (country in countries) {
+  print(country)
+  desmatamento <- isdo(country, pixel = 16)
+  if (is.character(desmatamento)) {
+    next
+  } else {
+    writeVector(desmatamento, paste0("C:/Users/georg/Downloads/countries", country, ".geojson"), filetype = "GeoJSON")
+  }
 }
